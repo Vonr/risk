@@ -31,7 +31,7 @@ var isReady = false
 
 var db *sql.DB
 var dbVersion = "1.0.0"
-var botName = "rich"
+var botName = "risk"
 
 var commands map[string]func(*discordgo.Session, *discordgo.MessageCreate, []string) = map[string]func(*discordgo.Session, *discordgo.MessageCreate, []string){
 	"commands":     help,
