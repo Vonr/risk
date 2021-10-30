@@ -551,9 +551,9 @@ func daily(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
-	newBal := new(big.Int).Add(getBalance(m.Author.ID), big.NewInt(100))
+	newBal := new(big.Int).Add(getBalance(m.Author.ID), big.NewInt(500))
 	setBalance(m.Author.ID, newBal)
-	msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you have claimed your daily supply of $100.\nYou now have $"+newBal.String()+" Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
+	msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you have claimed your daily supply of $500.\nYou now have $"+newBal.String()+" Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
 
 	stmt2, err := db.Prepare("UPDATE users SET daily=? WHERE id=?")
 	if err != nil {
