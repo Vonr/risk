@@ -94,7 +94,7 @@ func main() {
 	dg.AddHandler(messageCreate)
 	dg.AddHandler(ready)
 
-	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsGuildMembers | discordgo.IntentsGuilds
+	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsGuildMembers | discordgo.IntentsGuilds | discordgo.IntentsDirectMessages
 
 	err = dg.Open()
 	if err != nil {
@@ -282,20 +282,24 @@ func hasPerms(s *discordgo.Session, message *discordgo.Message, perms int64) boo
 
 func prefix(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if !hasPerms(s, m.Message, discordgo.PermissionManageServer) {
-		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you do not have the necessary permissions to change the prefix (Manage Server).")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you do not have the necessary permissions to change the prefix (Manage Server).")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 	if len(args) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "The current prefix is "+getPrefix(m.GuildID))
+		msg, _ := s.ChannelMessageSend(m.ChannelID, "The current prefix is "+getPrefix(m.GuildID))
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 	p := args[0]
 	if len(p) > 2 {
-		s.ChannelMessageSend(m.ChannelID, "Prefix should be no longer than 2 characters! This is done to save space.")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, "Prefix should be no longer than 2 characters! This is done to save space.")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 	setPrefix(m.GuildID, p)
-	s.ChannelMessageSend(m.ChannelID, "Prefix has been successfully changed to '"+p+"'")
+	msg, _ := s.ChannelMessageSend(m.ChannelID, "Prefix has been successfully changed to '"+p+"'")
+	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
 func setPrefix(id string, prefix string) {
@@ -346,7 +350,8 @@ func fiftyfifty(s *discordgo.Session, m *discordgo.MessageCreate, args []string)
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "50/50",
 	}
-	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	goDelete(s, m.ChannelID, 2*time.Second, []string{msg.ID, m.ID})
 }
 
 func help(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
@@ -354,7 +359,7 @@ func help(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	for cmd, desc := range cmdDescs {
 		message += cmd + ": `" + desc + "`\n"
 	}
-	s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
 		Color:  0xffff00,
 		Fields: []*discordgo.MessageEmbedField{
@@ -367,11 +372,13 @@ func help(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "Commands",
 	})
+	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
 func alts(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if len(args) == 0 {
-		s.ChannelMessageSend(m.ChannelID, "You need to specify a command to look for aliases for.")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, "You need to specify a command to look for aliases for.")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 	q := args[0]
@@ -401,7 +408,7 @@ func alts(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 			return
 		}
 	}
-	s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
 		Color:  0xff0000,
 		Fields: []*discordgo.MessageEmbedField{
@@ -414,30 +421,34 @@ func alts(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "Aliases",
 	})
-
+	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
 func balance(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if len(args) == 0 {
-		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" has $"+getBalance(m.Author.ID).String())
+		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" has $"+getBalance(m.Author.ID).String())
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 	id, err := getId(args[0])
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 
 	user, err := s.User(id)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
-	s.ChannelMessageSend(m.ChannelID, user.Username+"#"+user.Discriminator+" has $"+getBalance(user.ID).String())
+	createUser(s, id)
+	msg, _ := s.ChannelMessageSend(m.ChannelID, user.Username+"#"+user.Discriminator+" has $"+getBalance(user.ID).String())
+	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
 func getBalance(id string) *big.Int {
-	createUser(id)
 	stmt, err := db.Prepare("SELECT balance FROM users WHERE id=?")
 	if err != nil {
 		log.Fatalln("Could not get user's balance:", err)
@@ -455,7 +466,6 @@ func getBalance(id string) *big.Int {
 }
 
 func setBalance(id string, bal *big.Int) {
-	createUser(id)
 	stmt, err := db.Prepare("UPDATE users SET balance=? WHERE id=?")
 	if err != nil {
 		log.Fatalln("Could not update user's balance:", err)
@@ -467,10 +477,14 @@ func setBalance(id string, bal *big.Int) {
 	defer stmt.Close()
 }
 
-func createUser(id string) {
+func createUser(s *discordgo.Session, id string) (*discordgo.User, error) {
+	user, err := s.User(id)
+	if err != nil {
+		return nil, err
+	}
 	stmt, err := db.Prepare("SELECT balance FROM users WHERE id=?")
 	if err != nil {
-		log.Fatalln("Could not find balance from users table:", err)
+		return nil, err
 	}
 	defer stmt.Close()
 	var balanceStr string
@@ -478,14 +492,15 @@ func createUser(id string) {
 	if err != nil {
 		stmt2, err := db.Prepare("INSERT INTO users (id, type, balance, games, daily) VALUES (?, 'DEFAULT', ?, 0, 0)")
 		if err != nil {
-			log.Fatalln("Could not create new user:", err)
+			return nil, err
 		}
 		_, err = stmt2.Exec(id, "1000")
 		if err != nil {
-			log.Fatalln("Could not create new user:", err)
+			return nil, err
 		}
 		defer stmt.Close()
 	}
+	return user, nil
 }
 
 func getBet(id string, bet string) *big.Int {
@@ -517,7 +532,7 @@ func getBet(id string, bet string) *big.Int {
 }
 
 func daily(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
-	createUser(m.Author.ID)
+	createUser(s, m.Author.ID)
 	stmt, err := db.Prepare("SELECT daily FROM users WHERE id=?")
 	if err != nil {
 		log.Fatalln("Could not get daily flag:", err)
@@ -532,12 +547,13 @@ func daily(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	tmr := time.Now().AddDate(0, 0, 1)
 	tmr = time.Date(tmr.Year(), tmr.Month(), tmr.Day(), 0, 0, 0, 0, tmr.Location())
 	if time.Unix(daily, 0).Unix() >= time.Now().Unix() {
-		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you already claimed your daily supply today! Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you already claimed your daily supply today! Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 	newBal := new(big.Int).Add(getBalance(m.Author.ID), big.NewInt(100))
 	setBalance(m.Author.ID, newBal)
-	s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you have claimed your daily supply of $100.\nYou now have $"+newBal.String()+" Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
+	msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you have claimed your daily supply of $100.\nYou now have $"+newBal.String()+" Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
 
 	stmt2, err := db.Prepare("UPDATE users SET daily=? WHERE id=?")
 	if err != nil {
@@ -548,9 +564,11 @@ func daily(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		log.Fatalln("Could not update daily:", err)
 	}
 	defer stmt.Close()
+	goDelete(s, m.ChannelID, 2*time.Second, []string{msg.ID, m.ID})
 }
 
 func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
+	createUser(s, m.Author.ID)
 	stmt, err := db.Prepare("SELECT COUNT(*) FROM users")
 	if err != nil {
 		log.Fatalln("Could not count users:", err)
@@ -567,16 +585,22 @@ func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if len(args) > 0 {
 		page, err = strconv.Atoi(args[0])
 		if err != nil {
-			s.ChannelMessageSend(m.ChannelID, "Invalid page number: "+args[0])
+			msg, _ := s.ChannelMessageSend(m.ChannelID, "Invalid page number: "+args[0])
+			goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 			return
 		}
+		if page < 1 {
+			page = 1
+		}
 		if page > pages {
-			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Exceeded number of pages: %d/%d", page, pages))
+			msg, _ := s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Exceeded number of pages: %d/%d", page, pages))
+			goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+			return
 		}
 	}
 	page -= 1
 
-	stmt2, err := db.Prepare("SELECT id, balance FROM users ORDER BY balance DESC LIMIT 10 OFFSET ?")
+	stmt2, err := db.Prepare("SELECT id, balance FROM users ORDER BY CAST(balance AS DECIMAL(100, 100)) DESC LIMIT 10 OFFSET ?")
 	if err != nil {
 		log.Fatalln("Could not get top users:", err)
 	}
@@ -584,11 +608,11 @@ func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if err != nil {
 		log.Fatalln("Could not get top users:", err)
 	}
-	defer rows.Close()
 	defer stmt2.Close()
 
 	message := ""
 	n := page*10 + 1
+	defer rows.Close()
 	for rows.Next() {
 		var id string
 		var bal string
@@ -604,7 +628,7 @@ func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		n++
 	}
 
-	s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
 		Color:  0xffff00,
 		Fields: []*discordgo.MessageEmbedField{
@@ -617,27 +641,32 @@ func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "Top Players",
 	})
+	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
 func share(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if len(args) < 2 {
-		s.ChannelMessageSend(m.ChannelID, "Invalid syntax: `share <amount> <user>`")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, "Invalid syntax: `share <amount> <user>`")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 	id, err := getId(args[1])
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
-	createUser(id)
+	createUser(s, id)
 	if id == m.Author.ID {
-		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" I see what you're trying to do but I'm not going to allow it.")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" I see what you're trying to do but I'm not going to allow it.")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 	amount := getBet(m.Author.ID, args[0])
 	user, err := s.User(id)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
 		return
 	}
 	taxed := new(big.Int)
@@ -648,7 +677,7 @@ func share(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	setBalance(m.Author.ID, newSenderBal)
 	setBalance(id, newReceiverBal)
 
-	s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+	embed := &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
 		Color:  0x00ff00,
 		Fields: []*discordgo.MessageEmbedField{
@@ -661,7 +690,11 @@ func share(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "Sharing",
-	})
+	}
+	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	s.ChannelMessageSendEmbed(getDM(s, m.Author.ID).ID, embed)
+	s.ChannelMessageSendEmbed(getDM(s, user.ID).ID, embed)
+	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
 func getId(mention string) (string, error) {
@@ -671,4 +704,19 @@ func getId(mention string) (string, error) {
 		return "", err
 	}
 	return id, nil
+}
+
+func goDelete(s *discordgo.Session, channelID string, sleep time.Duration, messages []string) {
+	go func() {
+		time.Sleep(sleep)
+		s.ChannelMessagesBulkDelete(channelID, messages)
+	}()
+}
+
+func getDM(s *discordgo.Session, userID string) *discordgo.Channel {
+	ch, err := s.UserChannelCreate(userID)
+	if err != nil {
+		log.Fatalln("Could not create user channel:", err)
+	}
+	return ch
 }
