@@ -52,18 +52,22 @@ var commands map[string]func(*discordgo.Session, *discordgo.MessageCreate, []str
 	"top":          top,
 	"leaderboard":  top,
 	"lb":           top,
+	"share":        share,
+	"give":         share,
+	"gift":         share,
 	"50/50":        fiftyfifty,
 	"fiftyfifty":   fiftyfifty,
 	"5050":         fiftyfifty,
 }
 var cmdDescs map[string]string = map[string]string{
-	"commands":          "Displays a list of commands.",
-	"prefix [prefix]":   "Shows or sets the current prefix.",
-	"aliases [command]": "Shows all aliases for the command.",
-	"balance [user]":    "Displays the amount of money the user has.",
-	"daily":             "Claim your daily supply of money.",
-	"top [page]":        "Shows the top players.",
-	"50/50 [bet]":       "50% chance of winning, how lucky are you?",
+	"commands":              "Displays a list of commands.",
+	"prefix [prefix]":       "Shows or sets the current prefix.",
+	"aliases [command]":     "Shows all aliases for the command.",
+	"balance [user]":        "Displays the amount of money the user has.",
+	"daily":                 "Claim your daily supply of money.",
+	"top [page]":            "Shows the top players.",
+	"share <amount> <user>": "Shares coins with the user.",
+	"50/50 [bet]":           "50% chance of winning, how lucky are you?",
 }
 var aliases [][]string = [][]string{
 	{"commands", "help", "h", "cmds", "cmd"},
@@ -72,6 +76,7 @@ var aliases [][]string = [][]string{
 	{"balance", "bal", "money"},
 	{"daily", "d"},
 	{"top", "leaderboard", "lb"},
+	{"share", "give", "gift"},
 	{"50/50", "5050", "fiftyfifty"},
 }
 
@@ -215,7 +220,7 @@ func updateTables() error {
 }
 
 func ready(s *discordgo.Session, event *discordgo.Ready) {
-	s.UpdateGameStatus(0, "Being developed")
+	s.UpdateListeningStatus("@Risk help")
 	isReady = true
 }
 
@@ -417,9 +422,8 @@ func balance(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" has $"+getBalance(m.Author.ID).String())
 		return
 	}
-	id := strings.TrimSuffix(strings.TrimPrefix(args[0], "<@!"), ">")
-	_, suc := new(big.Int).SetString(id, 10)
-	if !suc {
+	id, err := getId(args[0])
+	if err != nil {
 		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
 		return
 	}
@@ -496,7 +500,7 @@ func getBet(id string, bet string) *big.Int {
 	} else if bet == "all" {
 		return balance
 	} else if bet == "half" {
-		return balance.Div(balance, big.NewInt(2))
+		new(big.Float).Mul(new(big.Float).SetInt(balance), big.NewFloat(0.5)).Int(amount)
 	} else {
 		amt, err := strconv.ParseFloat(bet, 64)
 		if err != nil || amt < 0 {
@@ -613,4 +617,58 @@ func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "Top Players",
 	})
+}
+
+func share(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
+	if len(args) < 2 {
+		s.ChannelMessageSend(m.ChannelID, "Invalid syntax: `share <amount> <user>`")
+		return
+	}
+	id, err := getId(args[1])
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		return
+	}
+	createUser(id)
+	if id == m.Author.ID {
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" I see what you're trying to do but I'm not going to allow it.")
+		return
+	}
+	amount := getBet(m.Author.ID, args[0])
+	user, err := s.User(id)
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
+		return
+	}
+	taxed := new(big.Int)
+	new(big.Float).Mul(new(big.Float).SetInt(amount), big.NewFloat(0.95)).Int(taxed)
+
+	newReceiverBal := new(big.Int).Add(getBalance(id), taxed)
+	newSenderBal := new(big.Int).Sub(getBalance(m.Author.ID), amount)
+	setBalance(m.Author.ID, newSenderBal)
+	setBalance(id, newReceiverBal)
+
+	s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+		Author: &discordgo.MessageEmbedAuthor{},
+		Color:  0x00ff00,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name: "Coins have been shared!",
+				Value: fmt.Sprintf("%s sent %s $%d ($%d after 5%% tax)\n%s\u27A4$%d\n%s\u27A4$%d",
+					m.Author.Mention(), user.Mention(), amount, taxed, m.Author.Mention(), newSenderBal, user.Mention(), newReceiverBal),
+				Inline: true,
+			},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+		Title:     "Sharing",
+	})
+}
+
+func getId(mention string) (string, error) {
+	id := strings.TrimSuffix(strings.TrimPrefix(mention, "<@!"), ">")
+	_, err := strconv.Atoi(id)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
 }
