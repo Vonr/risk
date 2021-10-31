@@ -622,7 +622,17 @@ func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		}
 		user, err := s.User(id)
 		if err != nil {
-			log.Fatalln("Could not get user", id, ":", err)
+			stmt3, err := db.Prepare("DELETE FROM users WHERE id=?")
+			if err != nil {
+				log.Fatalln("Could not delete user:", err)
+			}
+			_, err = stmt3.Exec(id)
+			if err != nil {
+				log.Fatalln("Could not delete user:", err)
+			}
+			defer stmt3.Close()
+			top(s, m, args)
+			return
 		}
 		message += fmt.Sprintf("%d: %s#%s \u27A4 $%s", n, user.Username, user.Discriminator, bal) + "\n"
 		n++
