@@ -864,6 +864,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			if d <= 15 {
 				game.hands[1] = append(game.hands[1], getRandomCard(&game.deck))
 			}
+			d = getHandTotal(&game.hands[1])
 			if p > 21 {
 				if d > 21 {
 					win = true
