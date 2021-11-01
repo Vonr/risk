@@ -705,21 +705,27 @@ func blackjack(s *discordgo.Session, m *discordgo.MessageCreate, args []string) 
 	}
 	rand.Seed(time.Now().UnixNano())
 
-	// This blackjack will be played with 8 decks
 	deck := map[string]int{
-		"A":  32,
-		"2":  32,
-		"3":  32,
-		"4":  32,
-		"5":  32,
-		"6":  32,
-		"7":  32,
-		"8":  32,
-		"9":  32,
-		"10": 32,
-		"J":  32,
-		"Q":  32,
-		"K":  32,
+		"A":  4,
+		"2":  4,
+		"3":  4,
+		"4":  4,
+		"5":  4,
+		"6":  4,
+		"7":  4,
+		"8":  4,
+		"9":  4,
+		"10": 4,
+		"J":  4,
+		"Q":  4,
+		"K":  4,
+	}
+
+	//Set deck to contain 6 decks
+	for i := 0; i < 6; i++ {
+		for _, card := range cardTypes {
+			deck[card] += 4
+		}
 	}
 
 	var dealerHand = make([]string, 0)
