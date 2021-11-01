@@ -55,11 +55,13 @@ var commands map[string]func(*discordgo.Session, *discordgo.MessageCreate, []str
 	"share":        share,
 	"give":         share,
 	"gift":         share,
+	"blackjack":    blackjack,
+	"bj":           blackjack,
 	"50/50":        fiftyfifty,
 	"fiftyfifty":   fiftyfifty,
 	"5050":         fiftyfifty,
 }
-var cmdDescs map[string]string = map[string]string{
+var cmdDescs = map[string]string{
 	"commands":              "Displays a list of commands.",
 	"prefix [prefix]":       "Shows or sets the current prefix.",
 	"aliases [command]":     "Shows all aliases for the command.",
@@ -67,9 +69,10 @@ var cmdDescs map[string]string = map[string]string{
 	"daily":                 "Claim your daily supply of money.",
 	"top [page]":            "Shows the top players.",
 	"share <amount> <user>": "Shares coins with the user.",
+	"blackjack <bet>":       "Play a game of blackjack.",
 	"50/50 [bet]":           "50% chance of winning, how lucky are you?",
 }
-var aliases [][]string = [][]string{
+var aliases = [][]string{
 	{"commands", "help", "h", "cmds", "cmd"},
 	{"prefix"},
 	{"aliases", "alternatives", "alt", "alts"},
@@ -77,7 +80,8 @@ var aliases [][]string = [][]string{
 	{"daily", "d"},
 	{"top", "leaderboard", "lb"},
 	{"share", "give", "gift"},
-	{"50/50", "5050", "fiftyfifty"},
+	{"blackjack", "bj"},
+	{"50/50", "fiftyfifty", "5050"},
 }
 
 func main() {
@@ -93,6 +97,7 @@ func main() {
 
 	dg.AddHandler(messageCreate)
 	dg.AddHandler(ready)
+	dg.AddHandler(interact)
 
 	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsGuildMembers | discordgo.IntentsGuilds | discordgo.IntentsDirectMessages
 
@@ -106,6 +111,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	rand.Seed(time.Now().UnixNano())
 	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
@@ -228,6 +234,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if !isReady || m.Author.Bot || m.Author.ID == s.State.User.ID {
 		return
 	}
+	if !autoInvalidatorRunning {
+		autoInvalidatorRunning = true
+		go autoInvalidator(s)
+	}
 
 	c := m.Content
 	lc := len(c)
@@ -282,24 +292,20 @@ func hasPerms(s *discordgo.Session, message *discordgo.Message, perms int64) boo
 
 func prefix(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if !hasPerms(s, m.Message, discordgo.PermissionManageServer) {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you do not have the necessary permissions to change the prefix (Manage Server).")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you do not have the necessary permissions to change the prefix (Manage Server).")
 		return
 	}
 	if len(args) == 0 {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, "The current prefix is "+getPrefix(m.GuildID))
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, "The current prefix is "+getPrefix(m.GuildID))
 		return
 	}
 	p := args[0]
 	if len(p) > 2 {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, "Prefix should be no longer than 2 characters! This is done to save space.")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, "Prefix should be no longer than 2 characters! This is done to save space.")
 		return
 	}
 	setPrefix(m.GuildID, p)
-	msg, _ := s.ChannelMessageSend(m.ChannelID, "Prefix has been successfully changed to '"+p+"'")
-	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
+	s.ChannelMessageSend(m.ChannelID, "Prefix has been successfully changed to '"+p+"'")
 }
 
 func setPrefix(id string, prefix string) {
@@ -350,8 +356,7 @@ func fiftyfifty(s *discordgo.Session, m *discordgo.MessageCreate, args []string)
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "50/50",
 	}
-	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, embed)
-	goDelete(s, m.ChannelID, 2*time.Second, []string{msg.ID, m.ID})
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }
 
 func help(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
@@ -359,7 +364,7 @@ func help(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	for cmd, desc := range cmdDescs {
 		message += cmd + ": `" + desc + "`\n"
 	}
-	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+	s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
 		Color:  0xffff00,
 		Fields: []*discordgo.MessageEmbedField{
@@ -372,13 +377,11 @@ func help(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "Commands",
 	})
-	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
 func alts(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if len(args) == 0 {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, "You need to specify a command to look for aliases for.")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, "You need to specify a command to look for aliases for.")
 		return
 	}
 	q := args[0]
@@ -408,7 +411,7 @@ func alts(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 			return
 		}
 	}
-	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+	s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
 		Color:  0xff0000,
 		Fields: []*discordgo.MessageEmbedField{
@@ -421,31 +424,26 @@ func alts(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "Aliases",
 	})
-	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
 func balance(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if len(args) == 0 {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" has $"+getBalance(m.Author.ID).String())
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" has $"+getBalance(m.Author.ID).String())
 		return
 	}
-	id, err := getId(args[0])
+	id, err := getID(args[0])
 	if err != nil {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
 		return
 	}
 
 	user, err := s.User(id)
 	if err != nil {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
 		return
 	}
 	createUser(s, id)
-	msg, _ := s.ChannelMessageSend(m.ChannelID, user.Username+"#"+user.Discriminator+" has $"+getBalance(user.ID).String())
-	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
+	s.ChannelMessageSend(m.ChannelID, user.Username+"#"+user.Discriminator+" has $"+getBalance(user.ID).String())
 }
 
 func getBalance(id string) *big.Int {
@@ -477,6 +475,13 @@ func setBalance(id string, bal *big.Int) {
 	defer stmt.Close()
 }
 
+func addBalance(id string, change *big.Int) *big.Int {
+	bal := getBalance(id)
+	bal.Add(bal, change)
+	setBalance(id, bal)
+	return bal
+}
+
 func createUser(s *discordgo.Session, id string) (*discordgo.User, error) {
 	user, err := s.User(id)
 	if err != nil {
@@ -494,7 +499,7 @@ func createUser(s *discordgo.Session, id string) (*discordgo.User, error) {
 		if err != nil {
 			return nil, err
 		}
-		_, err = stmt2.Exec(id, "1000")
+		_, err = stmt2.Exec(id, "10000")
 		if err != nil {
 			return nil, err
 		}
@@ -547,13 +552,11 @@ func daily(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	tmr := time.Now().AddDate(0, 0, 1)
 	tmr = time.Date(tmr.Year(), tmr.Month(), tmr.Day(), 0, 0, 0, 0, tmr.Location())
 	if time.Unix(daily, 0).Unix() >= time.Now().Unix() {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you already claimed your daily supply today! Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you already claimed your daily supply today! Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
 		return
 	}
-	newBal := new(big.Int).Add(getBalance(m.Author.ID), big.NewInt(500))
-	setBalance(m.Author.ID, newBal)
-	msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you have claimed your daily supply of $500.\nYou now have $"+newBal.String()+" Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
+	newBal := addBalance(m.Author.ID, big.NewInt(2000))
+	s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" you have claimed your daily supply of $2000.\nYou now have $"+newBal.String()+" Come back <t:"+fmt.Sprint(tmr.Unix())+":R>")
 
 	stmt2, err := db.Prepare("UPDATE users SET daily=? WHERE id=?")
 	if err != nil {
@@ -564,7 +567,6 @@ func daily(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		log.Fatalln("Could not update daily:", err)
 	}
 	defer stmt.Close()
-	goDelete(s, m.ChannelID, 2*time.Second, []string{msg.ID, m.ID})
 }
 
 func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
@@ -585,20 +587,18 @@ func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if len(args) > 0 {
 		page, err = strconv.Atoi(args[0])
 		if err != nil {
-			msg, _ := s.ChannelMessageSend(m.ChannelID, "Invalid page number: "+args[0])
-			goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+			s.ChannelMessageSend(m.ChannelID, "Invalid page number: "+args[0])
 			return
 		}
 		if page < 1 {
 			page = 1
 		}
 		if page > pages {
-			msg, _ := s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Exceeded number of pages: %d/%d", page, pages))
-			goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Exceeded number of pages: %d/%d", page, pages))
 			return
 		}
 	}
-	page -= 1
+	page--
 
 	stmt2, err := db.Prepare("SELECT id, balance FROM users ORDER BY CAST(balance AS DECIMAL(100, 100)) DESC LIMIT 10 OFFSET ?")
 	if err != nil {
@@ -638,7 +638,7 @@ func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		n++
 	}
 
-	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+	s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
 		Color:  0xffff00,
 		Fields: []*discordgo.MessageEmbedField{
@@ -651,41 +651,34 @@ func top(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "Top Players",
 	})
-	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
 func share(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if len(args) < 2 {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, "Invalid syntax: `share <amount> <user>`")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, "Invalid syntax: `share <amount> <user>`")
 		return
 	}
-	id, err := getId(args[1])
+	id, err := getID(args[1])
 	if err != nil {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
 		return
 	}
 	createUser(s, id)
 	if id == m.Author.ID {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" I see what you're trying to do but I'm not going to allow it.")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" I see what you're trying to do but I'm not going to allow it.")
 		return
 	}
 	amount := getBet(m.Author.ID, args[0])
 	user, err := s.User(id)
 	if err != nil {
-		msg, _ := s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
-		goDelete(s, m.ChannelID, 1*time.Second, []string{msg.ID, m.ID})
+		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[1]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
 		return
 	}
 	taxed := new(big.Int)
 	new(big.Float).Mul(new(big.Float).SetInt(amount), big.NewFloat(0.95)).Int(taxed)
 
-	newReceiverBal := new(big.Int).Add(getBalance(id), taxed)
-	newSenderBal := new(big.Int).Sub(getBalance(m.Author.ID), amount)
-	setBalance(m.Author.ID, newSenderBal)
-	setBalance(id, newReceiverBal)
+	newSenderBal := addBalance(m.Author.ID, new(big.Int).Sub(big.NewInt(0), amount))
+	newReceiverBal := addBalance(id, taxed)
 
 	embed := &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
@@ -701,13 +694,12 @@ func share(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		Timestamp: time.Now().Format(time.RFC3339),
 		Title:     "Sharing",
 	}
-	msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
 	s.ChannelMessageSendEmbed(getDM(s, m.Author.ID).ID, embed)
 	s.ChannelMessageSendEmbed(getDM(s, user.ID).ID, embed)
-	goDelete(s, m.ChannelID, 3*time.Second, []string{msg.ID, m.ID})
 }
 
-func getId(mention string) (string, error) {
+func getID(mention string) (string, error) {
 	id := strings.TrimSuffix(strings.TrimPrefix(mention, "<@!"), ">")
 	_, err := strconv.Atoi(id)
 	if err != nil {
@@ -716,17 +708,600 @@ func getId(mention string) (string, error) {
 	return id, nil
 }
 
-func goDelete(s *discordgo.Session, channelID string, sleep time.Duration, messages []string) {
-	go func() {
-		time.Sleep(sleep)
-		s.ChannelMessagesBulkDelete(channelID, messages)
-	}()
-}
-
 func getDM(s *discordgo.Session, userID string) *discordgo.Channel {
 	ch, err := s.UserChannelCreate(userID)
 	if err != nil {
 		log.Fatalln("Could not create user channel:", err)
 	}
 	return ch
+}
+
+var cardTypes = []string{"A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"}
+
+type blackjackGame struct {
+	deck  map[string]int
+	hands [][]string
+	msg   *discordgo.Message
+	bet   *big.Int
+	time  int64
+}
+
+var blackjackGames = make(map[string]blackjackGame)
+
+func blackjack(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
+	createUser(s, m.Author.ID)
+	if len(args) < 1 {
+		s.ChannelMessageSend(m.ChannelID, "Invalid syntax: `blackjack <bet>`")
+		return
+	}
+	existing, exists := blackjackGames[m.Author.ID]
+	if exists {
+		if time.Now().Unix()-existing.time > 10 {
+			delete(blackjackGames, m.Author.ID)
+		} else {
+			s.ChannelMessageSend(m.ChannelID, "You already have a game in progress.")
+			return
+		}
+	}
+
+	bet := getBet(m.Author.ID, args[0])
+	if bet.Cmp(big.NewInt(0)) != 1 {
+		s.ChannelMessageSend(m.ChannelID, "You must bet more than $0.")
+		return
+	}
+	rand.Seed(time.Now().UnixNano())
+
+	// This blackjack will be played with 8 decks
+	deck := map[string]int{
+		"A":  32,
+		"2":  32,
+		"3":  32,
+		"4":  32,
+		"5":  32,
+		"6":  32,
+		"7":  32,
+		"8":  32,
+		"9":  32,
+		"10": 32,
+		"J":  32,
+		"Q":  32,
+		"K":  32,
+	}
+
+	var dealerHand []string = make([]string, 0)
+	var playerHand []string = make([]string, 0)
+
+	dealerHand = append(dealerHand, getRandomCard(&deck))
+	dealerHand = append(dealerHand, getRandomCard(&deck))
+	for {
+		if getHandTotal(&dealerHand) >= 21 {
+			deck[dealerHand[len(dealerHand)-1]]++
+			dealerHand = remove(dealerHand, len(dealerHand)-1)
+		} else {
+			break
+		}
+	}
+
+	playerHand = append(playerHand, getRandomCard(&deck))
+	playerHand = append(playerHand, getRandomCard(&deck))
+	if getHandTotal(&playerHand) == 21 {
+		payout := new(big.Int)
+		new(big.Float).Mul(new(big.Float).SetInt(bet), big.NewFloat(2)).Int(payout)
+		addBalance(m.Author.ID, payout)
+		s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+			Content: "",
+			Embed: &discordgo.MessageEmbed{
+				Author: &discordgo.MessageEmbedAuthor{},
+				Color:  0x00ff00,
+				Fields: []*discordgo.MessageEmbedField{
+					{
+						Name:   "Player",
+						Value:  generateHandString(&playerHand),
+						Inline: true,
+					},
+					{
+						Name:   "Dealer",
+						Value:  generateHandString(&dealerHand),
+						Inline: true,
+					},
+					{
+						Name:   "Result",
+						Value:  "You got a blackjack! You now have " + getBalance(m.Author.ID).String() + "(" + bet.String() + ").",
+						Inline: true,
+					},
+				},
+				Timestamp: time.Now().Format(time.RFC3339),
+				Title:     "Blackjack - You won!",
+			},
+		})
+		return
+	}
+
+	// Generate message with discordgo components for Hit, Stand, and Forfeit that the player can interact with
+	msg, err := s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
+		Content: "",
+		Embed: &discordgo.MessageEmbed{
+			Author: &discordgo.MessageEmbedAuthor{},
+			Color:  0xffff00,
+			Fields: []*discordgo.MessageEmbedField{
+				{
+					Name:   "Player",
+					Value:  generateHandString(&playerHand),
+					Inline: true,
+				},
+				{
+					Name:   "Dealer",
+					Value:  "`" + dealerHand[0] + "` `?`",
+					Inline: true,
+				},
+			},
+			Timestamp: time.Now().Format(time.RFC3339),
+			Title:     "Blackjack",
+		},
+		Components: []discordgo.MessageComponent{
+			discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					discordgo.Button{
+						Label:    "Hit",
+						Style:    discordgo.SuccessButton,
+						Disabled: false,
+						CustomID: "bj_hit",
+					},
+					discordgo.Button{
+						Label:    "Stand",
+						Style:    discordgo.SuccessButton,
+						Disabled: false,
+						CustomID: "bj_stand",
+					},
+					discordgo.Button{
+						Label:    "Forfeit",
+						Style:    discordgo.DangerButton,
+						Disabled: false,
+						CustomID: "bj_forfeit",
+					},
+				},
+			},
+		},
+	})
+
+	if err != nil {
+		log.Fatalln("Could not send message:", err)
+	}
+
+	blackjackGames[m.Author.ID] = blackjackGame{
+		deck:  deck,
+		hands: [][]string{playerHand, dealerHand},
+		msg:   msg,
+		bet:   bet,
+		time:  time.Now().Unix(),
+	}
+}
+
+func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredMessageUpdate,
+		Data: &discordgo.InteractionResponseData{
+			Flags: 1,
+		},
+	})
+	id := ""
+	if i.GuildID != "" {
+		id = i.Member.User.ID
+	} else {
+		id = i.User.ID
+	}
+	game, exists := blackjackGames[id]
+
+	if exists && i.Message.ID == game.msg.ID {
+		game.time = time.Now().Unix()
+		switch i.MessageComponentData().CustomID {
+
+		case "bj_hit":
+			game.hands[0] = append(game.hands[0], getRandomCard(&game.deck))
+			result := "You busted!"
+			color := 0xff0000
+			payout := new(big.Int)
+			win := false
+			var mult *big.Float = nil
+			for {
+				if getHandTotal(&game.hands[1]) <= 16 {
+					game.hands[1] = append(game.hands[1], getRandomCard(&game.deck))
+				} else {
+					break
+				}
+			}
+			if getHandTotal(&game.hands[0]) > 21 {
+				win = false
+				mult = big.NewFloat(-1)
+			} else if getHandTotal(&game.hands[1]) == 21 || len(game.hands[1]) == 5 {
+				if getHandTotal(&game.hands[0]) == 21 || len(game.hands[0]) == 5 {
+					win = true
+					mult = big.NewFloat(0)
+				} else {
+					win = false
+					mult = big.NewFloat(-1)
+				}
+			} else if getHandTotal(&game.hands[0]) == 21 || len(game.hands[0]) == 5 {
+				win = true
+				mult = big.NewFloat(1.5)
+			} else {
+				if getHandTotal(&game.hands[1]) > 21 {
+					win = true
+					mult = big.NewFloat(1)
+					if getHandTotal(&game.hands[0]) > 21 {
+						win = true
+						mult = big.NewFloat(0)
+					}
+				}
+			}
+
+			if mult != nil {
+				if win {
+					switch mult.Cmp(big.NewFloat(1)) {
+					case 1:
+						color = 0x00ff00
+						result = "You got a blackjack/charlie!"
+					case 0:
+						color = 0x00ff00
+						result = "You won"
+					case -1:
+						color = 0xffff00
+						result = "You tied"
+					}
+					// Payout of bet * multiplier
+					new(big.Float).Mul(new(big.Float).SetInt(game.bet), mult).Int(payout)
+					addBalance(id, payout)
+				} else {
+					// Remove initial bet from balance
+					addBalance(id, payout.Neg(game.bet))
+				}
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{})
+				s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+					Channel: game.msg.ChannelID,
+					ID:      game.msg.ID,
+					Embeds: []*discordgo.MessageEmbed{
+						{
+							Author: &discordgo.MessageEmbedAuthor{},
+							Color:  color,
+							Fields: []*discordgo.MessageEmbedField{
+								{
+									Name:   "Player",
+									Value:  generateHandString(&game.hands[0]),
+									Inline: true,
+								},
+								{
+									Name:   "Dealer",
+									Value:  generateHandString(&game.hands[1]),
+									Inline: true,
+								},
+								{
+									Name:   "Result",
+									Value:  result + ", You now have " + getBalance(id).String() + " (" + payout.String() + ").",
+									Inline: true,
+								},
+							},
+							Timestamp: time.Now().Format(time.RFC3339),
+							Title:     "Blackjack",
+						},
+					},
+				})
+				delete(blackjackGames, id)
+			} else {
+
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{})
+				s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+					Channel: game.msg.ChannelID,
+					ID:      game.msg.ID,
+					Embeds: []*discordgo.MessageEmbed{
+						{
+							Author: &discordgo.MessageEmbedAuthor{},
+							Color:  0xffff00,
+							Fields: []*discordgo.MessageEmbedField{
+								{
+									Name:   "Player",
+									Value:  generateHandString(&game.hands[0]),
+									Inline: true,
+								},
+								{
+									Name:   "Dealer",
+									Value:  "`" + game.hands[1][0] + "` `?`",
+									Inline: true,
+								},
+							},
+							Timestamp: time.Now().Format(time.RFC3339),
+							Title:     "Blackjack",
+						},
+					},
+					Components: []discordgo.MessageComponent{
+						discordgo.ActionsRow{
+							Components: []discordgo.MessageComponent{
+								discordgo.Button{
+									Label:    "Hit",
+									Style:    discordgo.SuccessButton,
+									Disabled: false,
+									CustomID: "bj_hit",
+								},
+								discordgo.Button{
+									Label: "Stand",
+
+									Style:    discordgo.SuccessButton,
+									Disabled: false,
+									CustomID: "bj_stand",
+								},
+								discordgo.Button{
+									Label:    "Forfeit",
+									Style:    discordgo.DangerButton,
+									Disabled: false,
+									CustomID: "bj_forfeit",
+								},
+							},
+						},
+					},
+				})
+			}
+
+		case "bj_stand":
+			result := "You lost"
+			color := 0xff0000
+			payout := new(big.Int)
+			for {
+				if getHandTotal(&game.hands[1]) <= 16 {
+					game.hands[1] = append(game.hands[1], getRandomCard(&game.deck))
+				} else {
+					break
+				}
+			}
+			win, mult := checkHands(&game.hands[0], &game.hands[1])
+			if mult == nil {
+				if getHandTotal(&game.hands[0]) == getHandTotal(&game.hands[1]) {
+					mult = big.NewFloat(0)
+				} else {
+					win = false
+				}
+			}
+
+			if win {
+				if mult.Cmp(big.NewFloat(1)) >= 0 {
+					color = 0x00ff00
+					result = "You won"
+				} else {
+					color = 0xffff00
+					result = "You tied"
+				}
+				// Payout of bet * multiplier
+				new(big.Float).Mul(new(big.Float).SetInt(game.bet), mult).Int(payout)
+				addBalance(id, payout)
+			} else {
+				// Remove initial bet from balance
+				addBalance(id, payout.Neg(game.bet))
+			}
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{})
+			s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+				Channel: game.msg.ChannelID,
+				ID:      game.msg.ID,
+				Embeds: []*discordgo.MessageEmbed{
+					{
+						Author: &discordgo.MessageEmbedAuthor{},
+						Color:  color,
+						Fields: []*discordgo.MessageEmbedField{
+							{
+								Name:   "Player",
+								Value:  generateHandString(&game.hands[0]),
+								Inline: true,
+							},
+							{
+								Name:   "Dealer",
+								Value:  generateHandString(&game.hands[1]),
+								Inline: true,
+							},
+							{
+								Name:   "Result",
+								Value:  result + ", You now have " + getBalance(id).String() + " (" + payout.String() + ").",
+								Inline: true,
+							},
+						},
+						Timestamp: time.Now().Format(time.RFC3339),
+						Title:     "Blackjack - " + result,
+					},
+				},
+			})
+			delete(blackjackGames, id)
+
+		case "bj_forfeit":
+			// Remove initial bet from balance
+			addBalance(i.User.ID, new(big.Int).Neg(game.bet))
+			s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+				Channel: game.msg.ChannelID,
+				ID:      game.msg.ID,
+				Embeds: []*discordgo.MessageEmbed{
+					{
+						Author: &discordgo.MessageEmbedAuthor{},
+						Color:  0x00ff00,
+						Fields: []*discordgo.MessageEmbedField{
+							{
+								Name:   "Player",
+								Value:  generateHandString(&game.hands[0]),
+								Inline: true,
+							},
+							{
+								Name:   "Dealer",
+								Value:  generateHandString(&game.hands[1]),
+								Inline: true,
+							},
+							{
+								Name:   "Result",
+								Value:  "You forfeited, You now have " + getBalance(i.User.ID).String() + "(-" + game.bet.String() + ").",
+								Inline: true,
+							},
+						},
+						Timestamp: time.Now().Format(time.RFC3339),
+						Title:     "Blackjack - You forfeited",
+					},
+				},
+			})
+			delete(blackjackGames, id)
+		}
+
+	} else {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "This is not your game!",
+				Flags:   2,
+			},
+		})
+	}
+}
+
+func getRandomCard(deck *map[string]int) string {
+	rand.Seed(time.Now().UnixNano())
+	for {
+		card := cardTypes[rand.Intn(len(cardTypes))]
+		if (*deck)[card] > 0 {
+			(*deck)[card]--
+			return card
+		}
+	}
+}
+
+func generateHandString(hand *[]string) string {
+	var handString string = ""
+	for _, card := range *hand {
+		handString += "`" + card + "` "
+	}
+	return handString + "\nTotal: " + strconv.Itoa(getHandTotal(hand))
+}
+
+func getHandTotal(hand *[]string) int {
+	cardValues := map[string]int{
+		"2":  2,
+		"3":  3,
+		"4":  4,
+		"5":  5,
+		"6":  6,
+		"7":  7,
+		"8":  8,
+		"9":  9,
+		"10": 10,
+		"J":  10,
+		"Q":  10,
+		"K":  10,
+	}
+	var total int = 0
+	var aces int = 0
+	// Ace is 11 unless it would make the total go over 21
+	// Due to this, its value should only be calculated after the rest.
+	for _, card := range *hand {
+		if card == "A" {
+			total += 11
+			aces++
+		} else {
+			total += cardValues[card]
+		}
+	}
+	for i := 0; i < aces; i++ {
+		if total > 21 {
+			total -= 10
+		}
+	}
+	return total
+}
+
+func checkHands(player *[]string, dealer *[]string) (bool, *big.Float) {
+	// If the player lost, return false
+	// If the the player has a blackjack, a push or has 5 cards without busting, the player wins 1.5x the bet so 1.5 should be returned.
+	// If the player's hand is a bust, the player loses all of his bet so -1 should be returned.
+
+	if getHandTotal(player) > 21 {
+		return false, big.NewFloat(-1)
+	}
+
+	if getHandTotal(dealer) == 21 || len(*dealer) == 5 {
+		if getHandTotal(player) == 21 || len(*player) == 5 {
+			return true, big.NewFloat(0)
+		} else {
+			return false, big.NewFloat(-1)
+		}
+	}
+
+	if getHandTotal(player) == 21 || len(*player) == 5 {
+		return true, big.NewFloat(1.5)
+	}
+
+	if len(*player) == 5 && getHandTotal(player) <= 21 {
+		return true, big.NewFloat(1.5)
+	}
+
+	if getHandTotal(player) > getHandTotal(dealer) {
+		return true, big.NewFloat(1)
+	}
+
+	if getHandTotal(dealer) > 21 {
+		return true, big.NewFloat(1)
+	}
+
+	//	if getHandTotal(player) == getHandTotal(dealer) {
+	//		return true, big.NewFloat(0)
+	//	}
+
+	return true, nil
+}
+
+func interact(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	switch i.Type {
+	case discordgo.InteractionMessageComponent:
+		if strings.HasPrefix(i.MessageComponentData().CustomID, "bj_") {
+			blackjackCont(s, i)
+		}
+	}
+}
+
+// https://stackoverflow.com/a/37335777 by T. Claverie under CC BY-SA 4.0
+func remove(s []string, i int) []string {
+	s[i] = s[len(s)-1]
+	return s[:len(s)-1]
+}
+
+var autoInvalidatorRunning = false
+
+func autoInvalidator(s *discordgo.Session) {
+	for {
+		time.Sleep(time.Second)
+		for id, game := range blackjackGames {
+			if time.Now().Unix()-game.time > 10 {
+				// Remove initial bet from balance
+				addBalance(id, game.bet.Neg(game.bet))
+				s.ChannelMessageEditComplex(&discordgo.MessageEdit{
+					Channel: game.msg.ChannelID,
+					ID:      game.msg.ID,
+					Embeds: []*discordgo.MessageEmbed{
+						{
+							Author: &discordgo.MessageEmbedAuthor{},
+							Color:  0xff0000,
+							Fields: []*discordgo.MessageEmbedField{
+								{
+									Name:   "Player",
+									Value:  generateHandString(&game.hands[0]),
+									Inline: true,
+								},
+								{
+									Name:   "Dealer",
+									Value:  generateHandString(&game.hands[1]),
+									Inline: true,
+								},
+								{
+									Name:   "Result",
+									Value:  "You timed out. You lost " + game.bet.String() + ", and now have " + getBalance(id).String() + ".",
+									Inline: true,
+								},
+							},
+							Timestamp: time.Now().Format(time.RFC3339),
+							Title:     "Blackjack - Timeout",
+						},
+					},
+				})
+				delete(blackjackGames, id)
+			}
+		}
+	}
 }
