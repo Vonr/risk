@@ -512,11 +512,11 @@ func getBet(id string, bet string) *big.Int {
 	balance := getBalance(id)
 	amount := big.NewInt(0)
 	if strings.HasSuffix(bet, "%") {
-		percentage, err := strconv.Atoi(strings.TrimSuffix(bet, "%"))
+		percentage, err := strconv.ParseFloat(strings.TrimSuffix(bet, "%"), 64)
 		if err != nil || percentage < 0 || percentage > 100 {
 			return amount
 		}
-		new(big.Float).Mul(new(big.Float).SetInt(balance), big.NewFloat(float64(percentage)*0.01)).Int(amount)
+		new(big.Float).Mul(new(big.Float).SetInt(balance), big.NewFloat(percentage*0.01)).Int(amount)
 	} else if bet == "all" {
 		return balance
 	} else if bet == "half" {
@@ -768,8 +768,8 @@ func blackjack(s *discordgo.Session, m *discordgo.MessageCreate, args []string) 
 		"K":  32,
 	}
 
-	var dealerHand []string = make([]string, 0)
-	var playerHand []string = make([]string, 0)
+	var dealerHand = make([]string, 0)
+	var playerHand = make([]string, 0)
 
 	dealerHand = append(dealerHand, getRandomCard(&deck))
 	dealerHand = append(dealerHand, getRandomCard(&deck))
@@ -902,37 +902,41 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			color := 0xff0000
 			payout := new(big.Int)
 			win := false
-			var mult *big.Float = nil
-			for {
-				if getHandTotal(&game.hands[1]) <= 16 {
-					game.hands[1] = append(game.hands[1], getRandomCard(&game.deck))
-				} else {
-					break
-				}
+			var mult *big.Float
+			p := getHandTotal(&game.hands[0])
+			d := getHandTotal(&game.hands[1])
+			if d <= 16 {
+				game.hands[1] = append(game.hands[1], getRandomCard(&game.deck))
 			}
-			if getHandTotal(&game.hands[0]) > 21 {
-				win = false
-				mult = big.NewFloat(-1)
-			} else if getHandTotal(&game.hands[1]) == 21 || len(game.hands[1]) == 5 {
-				if getHandTotal(&game.hands[0]) == 21 || len(game.hands[0]) == 5 {
+			if p > 21 {
+				if d > 21 {
 					win = true
 					mult = big.NewFloat(0)
 				} else {
 					win = false
 					mult = big.NewFloat(-1)
 				}
-			} else if getHandTotal(&game.hands[0]) == 21 || len(game.hands[0]) == 5 {
+			} else if d == 21 || (len(game.hands[1]) == 5 && d <= 21) {
+				if p == 21 || (len(game.hands[0]) == 5 && p <= 21) {
+					win = true
+					mult = big.NewFloat(0)
+				} else {
+					win = true
+					mult = nil
+				}
+			} else if p == 21 || (len(game.hands[0]) == 5 && p <= 21) {
 				win = true
 				mult = big.NewFloat(1.5)
-			} else {
-				if getHandTotal(&game.hands[1]) > 21 {
+			} else if d > 21 {
+				win = true
+				mult = big.NewFloat(1)
+				if p > 21 {
 					win = true
-					mult = big.NewFloat(1)
-					if getHandTotal(&game.hands[0]) > 21 {
-						win = true
-						mult = big.NewFloat(0)
-					}
+					mult = big.NewFloat(0)
 				}
+			} else {
+				win = false
+				mult = nil
 			}
 
 			if mult != nil {
@@ -1165,7 +1169,7 @@ func getRandomCard(deck *map[string]int) string {
 }
 
 func generateHandString(hand *[]string) string {
-	var handString string = ""
+	var handString string
 	for _, card := range *hand {
 		handString += "`" + card + "` "
 	}
@@ -1187,8 +1191,8 @@ func getHandTotal(hand *[]string) int {
 		"Q":  10,
 		"K":  10,
 	}
-	var total int = 0
-	var aces int = 0
+	var total int
+	var aces int
 	// Ace is 11 unless it would make the total go over 21
 	// Due to this, its value should only be calculated after the rest.
 	for _, card := range *hand {
@@ -1211,33 +1215,42 @@ func checkHands(player *[]string, dealer *[]string) (bool, *big.Float) {
 	// If the player lost, return false
 	// If the the player has a blackjack, a push or has 5 cards without busting, the player wins 1.5x the bet so 1.5 should be returned.
 	// If the player's hand is a bust, the player loses all of his bet so -1 should be returned.
+	p := getHandTotal(player)
+	d := getHandTotal(dealer)
 
-	if getHandTotal(player) > 21 {
+	if p > 21 && d > 21 {
+		return true, big.NewFloat(0)
+	}
+
+	if p > 21 {
 		return false, big.NewFloat(-1)
 	}
 
-	if getHandTotal(dealer) == 21 || len(*dealer) == 5 {
-		if getHandTotal(player) == 21 || len(*player) == 5 {
+	if d == 21 || (len(*dealer) == 5 && d <= 21) {
+		if p == 21 || (len(*player) == 5 && p <= 21) {
 			return true, big.NewFloat(0)
-		} else {
-			return false, big.NewFloat(-1)
 		}
+		return false, big.NewFloat(-1)
 	}
 
-	if getHandTotal(player) == 21 || len(*player) == 5 {
+	if p == 21 {
 		return true, big.NewFloat(1.5)
 	}
 
-	if len(*player) == 5 && getHandTotal(player) <= 21 {
+	if len(*player) == 5 && p <= 21 {
 		return true, big.NewFloat(1.5)
 	}
 
-	if getHandTotal(player) > getHandTotal(dealer) {
+	if p > d {
 		return true, big.NewFloat(1)
 	}
 
-	if getHandTotal(dealer) > 21 {
+	if d > 21 {
 		return true, big.NewFloat(1)
+	}
+
+	if p == d {
+		return true, big.NewFloat(0)
 	}
 
 	//	if getHandTotal(player) == getHandTotal(dealer) {
