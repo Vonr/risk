@@ -18,7 +18,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	_ "github.com/mattn/go-sqlite3"
-	"golang.org/x/mod/semver"
 )
 
 func init() {
@@ -30,8 +29,6 @@ var token string
 var isReady = false
 
 var db *sql.DB
-var dbVersion = "1.0.0"
-var botName = "risk"
 
 var commands map[string]func(*discordgo.Session, *discordgo.MessageCreate, []string) = map[string]func(*discordgo.Session, *discordgo.MessageCreate, []string){
 	"commands":     help,
@@ -52,6 +49,7 @@ var commands map[string]func(*discordgo.Session, *discordgo.MessageCreate, []str
 	"top":          top,
 	"leaderboard":  top,
 	"lb":           top,
+	"stats":        stats,
 	"share":        share,
 	"give":         share,
 	"gift":         share,
@@ -68,6 +66,7 @@ var cmdDescs = map[string]string{
 	"balance [user]":        "Displays the amount of money the user has.",
 	"daily":                 "Claim your daily supply of money.",
 	"top [page]":            "Shows the top players.",
+	"stats [user]":          "Shows the user's stats.",
 	"share <amount> <user>": "Shares coins with the user.",
 	"blackjack <bet>":       "Play a game of blackjack.",
 	"50/50 [bet]":           "50% chance of winning, how lucky are you?",
@@ -79,6 +78,7 @@ var aliases = [][]string{
 	{"balance", "bal", "money"},
 	{"daily", "d"},
 	{"top", "leaderboard", "lb"},
+	{"stats"},
 	{"share", "give", "gift"},
 	{"blackjack", "bj"},
 	{"50/50", "fiftyfifty", "5050"},
@@ -147,58 +147,14 @@ func initDB() error {
 		}
 	}
 
-	fmt.Println("Getting last version of database")
-	row, err := db.Query("SELECT version FROM metadata WHERE name=?", botName)
-	if err != nil {
-		return populateMetadata()
-	}
-	defer row.Close()
-	for row.Next() {
-		var lastVersion string
-		row.Scan(&lastVersion)
-
-		if semver.Compare(dbVersion, lastVersion) == -1 {
-			err := updateTables()
-			if err != nil {
-				return errors.New("Failed to update tables from " + lastVersion + " to " + dbVersion + ": " + err.Error())
-			}
-
-			updateVersionSQL := "UPDATE metadata SET version=? WHERE name=?"
-			statement, err := db.Prepare(updateVersionSQL)
-			if err != nil {
-				return errors.New("Could not update metadata: " + err.Error())
-			}
-			_, err = statement.Exec(dbVersion, botName)
-			if err != nil {
-				return errors.New("Could not update metadata: " + err.Error())
-			}
-			defer statement.Close()
-		}
-	}
-
-	return nil
-}
-
-func populateMetadata() error {
-	insertMetadataSQL := "INSERT INTO metadata(`name`, `version`) VALUES (?, ?)"
-	statement, err := db.Prepare(insertMetadataSQL)
-	if err != nil {
-		return errors.New("Could not add metadata to database: " + err.Error())
-	}
-	_, err = statement.Exec(botName, dbVersion)
-	if err != nil {
-		return errors.New("Could not add metadata to database: " + err.Error())
-	}
-	defer statement.Close()
 	return nil
 }
 
 func initTables(db *sql.DB) error {
-	tableNames := []string{"metadata", "servers", "users", "cooldowns"}
+	tableNames := []string{"servers", "users", "cooldowns"}
 	statements := []string{
-		"CREATE TABLE IF NOT EXISTS `metadata` (`name` TEXT NOT NULL PRIMARY KEY, `version` TEXT NOT NULL DEFAULT '1.0.0')",
 		"CREATE TABLE IF NOT EXISTS `servers` (`id` TEXT NOT NULL PRIMARY KEY, `type` TEXT NOT NULL DEFAULT 'DEFAULT', `prefix` TEXT NOT NULL DEFAULT ',');",
-		"CREATE TABLE IF NOT EXISTS `users` (`id` TEXT NOT NULL PRIMARY KEY, `type` TEXT NOT NULL DEFAULT 'DEFAULT', `balance` TEXT NOT NULL DEFAULT '0', `games` INTEGER NOT NULL DEFAULT 0, `daily`, INTEGER NOT NULL DEFAULT 0);",
+		"CREATE TABLE IF NOT EXISTS `users` (`id` TEXT NOT NULL PRIMARY KEY, `type` TEXT NOT NULL DEFAULT 'DEFAULT', `balance` TEXT NOT NULL DEFAULT '0', `games` INTEGER NOT NULL DEFAULT 0, `daily` INTEGER NOT NULL DEFAULT 0, `ff_wins` INTEGER NOT NULL DEFAULT 0, `ff_losses` INTEGER NOT NULL DEFAULT 0, `bj_wins` INTEGER NOT NULL DEFAULT 0, `bj_losses` INTEGER NOT NULL DEFAULT 0);",
 		"CREATE TABLE IF NOT EXISTS `cooldowns` (`user_id` TEXT NOT NULL PRIMARY KEY, `balance` INTEGER NOT NULL DEFAULT 0, `top` INTEGER NOT NULL DEFAULT 0, `blackjack` INTEGER NOT NULL DEFAULT 0, `half` INTEGER NOT NULL DEFAULT 0, `scratch` INTEGER NOT NULL DEFAULT 0);"}
 
 	tableName := ""
@@ -217,11 +173,6 @@ func initTables(db *sql.DB) error {
 		fmt.Println("Created", tableName, "table successfully.")
 	}
 
-	err := populateMetadata()
-	return err
-}
-
-func updateTables() error {
 	return nil
 }
 
@@ -335,6 +286,9 @@ func fiftyfifty(s *discordgo.Session, m *discordgo.MessageCreate, args []string)
 		message = m.Author.Mention() + " lost their 50/50 :("
 		color = 0xff0000
 		bet.Sub(big.NewInt(0), bet)
+		addStat(m.Author.ID, "ff_losses", 1)
+	} else {
+		addStat(m.Author.ID, "ff_wins", 1)
 	}
 
 	newBalance := balance.Add(balance, bet)
@@ -437,7 +391,7 @@ func balance(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 		return
 	}
 
-	user, err := s.User(id)
+	user, err := createUser(s, id)
 	if err != nil {
 		s.ChannelMessageSend(m.ChannelID, m.Author.Mention()+" "+args[0]+" is not a valid User ID.\nPlease ping the user or copy their ID and paste it.")
 		return
@@ -495,7 +449,7 @@ func createUser(s *discordgo.Session, id string) (*discordgo.User, error) {
 	var balanceStr string
 	err = stmt.QueryRow(id).Scan(&balanceStr)
 	if err != nil {
-		stmt2, err := db.Prepare("INSERT INTO users (id, type, balance, games, daily) VALUES (?, 'DEFAULT', ?, 0, 0)")
+		stmt2, err := db.Prepare("INSERT INTO users (id, type, balance, games, daily, ff_wins, ff_losses, bj_wins, bj_losses) VALUES (?, 'DEFAULT', ?, 0, 0, 0, 0, 0, 0)")
 		if err != nil {
 			return nil, err
 		}
@@ -700,7 +654,7 @@ func share(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 }
 
 func getID(mention string) (string, error) {
-	id := strings.TrimSuffix(strings.TrimPrefix(mention, "<@!"), ">")
+	id := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(mention, "<@"), "!"), ">")
 	_, err := strconv.Atoi(id)
 	if err != nil {
 		return "", err
@@ -784,9 +738,10 @@ func blackjack(s *discordgo.Session, m *discordgo.MessageCreate, args []string) 
 
 	playerHand = append(playerHand, getRandomCard(&deck))
 	playerHand = append(playerHand, getRandomCard(&deck))
+	//	dealerHand = append(dealerHand, getRandomCard(&deck))
 	if getHandTotal(&playerHand) == 21 {
 		payout := new(big.Int)
-		new(big.Float).Mul(new(big.Float).SetInt(bet), big.NewFloat(2)).Int(payout)
+		new(big.Float).Mul(new(big.Float).SetInt(bet), big.NewFloat(1.5)).Int(payout)
 		addBalance(m.Author.ID, payout)
 		s.ChannelMessageSendComplex(m.ChannelID, &discordgo.MessageSend{
 			Content: "",
@@ -806,14 +761,15 @@ func blackjack(s *discordgo.Session, m *discordgo.MessageCreate, args []string) 
 					},
 					{
 						Name:   "Result",
-						Value:  "You got a blackjack! You now have " + getBalance(m.Author.ID).String() + "(" + bet.String() + ").",
-						Inline: true,
+						Value:  "You got a blackjack! You now have " + getBalance(m.Author.ID).String() + " (" + payout.String() + ").",
+						Inline: false,
 					},
 				},
 				Timestamp: time.Now().Format(time.RFC3339),
 				Title:     "Blackjack - You won!",
 			},
 		})
+		addStat(m.Author.ID, "bj_wins", 1)
 		return
 	}
 
@@ -905,7 +861,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			var mult *big.Float
 			p := getHandTotal(&game.hands[0])
 			d := getHandTotal(&game.hands[1])
-			if d <= 16 {
+			if d <= 15 {
 				game.hands[1] = append(game.hands[1], getRandomCard(&game.deck))
 			}
 			if p > 21 {
@@ -945,9 +901,11 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					case 1:
 						color = 0x00ff00
 						result = "You got a blackjack/charlie!"
+						addStat(id, "bj_wins", 1)
 					case 0:
 						color = 0x00ff00
 						result = "You won"
+						addStat(id, "bj_wins", 1)
 					case -1:
 						color = 0xffff00
 						result = "You tied"
@@ -958,6 +916,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				} else {
 					// Remove initial bet from balance
 					addBalance(id, payout.Neg(game.bet))
+					addStat(id, "bj_losses", 1)
 				}
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{})
 				s.ChannelMessageEditComplex(&discordgo.MessageEdit{
@@ -981,7 +940,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 								{
 									Name:   "Result",
 									Value:  result + ", You now have " + getBalance(id).String() + " (" + payout.String() + ").",
-									Inline: true,
+									Inline: false,
 								},
 							},
 							Timestamp: time.Now().Format(time.RFC3339),
@@ -1009,7 +968,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 								{
 									Name:   "Dealer",
 									Value:  "`" + game.hands[1][0] + "` `?`",
-									Inline: true,
+									Inline: false,
 								},
 							},
 							Timestamp: time.Now().Format(time.RFC3339),
@@ -1049,7 +1008,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			color := 0xff0000
 			payout := new(big.Int)
 			for {
-				if getHandTotal(&game.hands[1]) <= 16 {
+				if getHandTotal(&game.hands[1]) <= 15 {
 					game.hands[1] = append(game.hands[1], getRandomCard(&game.deck))
 				} else {
 					break
@@ -1068,6 +1027,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				if mult.Cmp(big.NewFloat(1)) >= 0 {
 					color = 0x00ff00
 					result = "You won"
+					addStat(id, "bj_wins", 1)
 				} else {
 					color = 0xffff00
 					result = "You tied"
@@ -1078,6 +1038,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			} else {
 				// Remove initial bet from balance
 				addBalance(id, payout.Neg(game.bet))
+				addStat(id, "bj_losses", 1)
 			}
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{})
 			s.ChannelMessageEditComplex(&discordgo.MessageEdit{
@@ -1101,7 +1062,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 							{
 								Name:   "Result",
 								Value:  result + ", You now have " + getBalance(id).String() + " (" + payout.String() + ").",
-								Inline: true,
+								Inline: false,
 							},
 						},
 						Timestamp: time.Now().Format(time.RFC3339),
@@ -1114,6 +1075,8 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		case "bj_forfeit":
 			// Remove initial bet from balance
 			addBalance(i.User.ID, new(big.Int).Neg(game.bet))
+			// Add one to SQLite Table `stats` for `bj_losses`
+
 			s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 				Channel: game.msg.ChannelID,
 				ID:      game.msg.ID,
@@ -1135,7 +1098,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 							{
 								Name:   "Result",
 								Value:  "You forfeited, You now have " + getBalance(i.User.ID).String() + "(-" + game.bet.String() + ").",
-								Inline: true,
+								Inline: false,
 							},
 						},
 						Timestamp: time.Now().Format(time.RFC3339),
@@ -1283,7 +1246,7 @@ func autoInvalidator(s *discordgo.Session) {
 		for id, game := range blackjackGames {
 			if time.Now().Unix()-game.time > 10 {
 				// Remove initial bet from balance
-				addBalance(id, game.bet.Neg(game.bet))
+				addBalance(id, new(big.Int).Neg(game.bet))
 				s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 					Channel: game.msg.ChannelID,
 					ID:      game.msg.ID,
@@ -1305,7 +1268,7 @@ func autoInvalidator(s *discordgo.Session) {
 								{
 									Name:   "Result",
 									Value:  "You timed out. You lost " + game.bet.String() + ", and now have " + getBalance(id).String() + ".",
-									Inline: true,
+									Inline: false,
 								},
 							},
 							Timestamp: time.Now().Format(time.RFC3339),
@@ -1317,4 +1280,85 @@ func autoInvalidator(s *discordgo.Session) {
 			}
 		}
 	}
+}
+
+func stats(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
+	var id string
+	if len(args) == 0 {
+		id = m.Author.ID
+	} else {
+		iid, err := getID(args[0])
+		id = iid
+		if err != nil {
+			s.ChannelMessageSend(m.ChannelID, "Could not find user.")
+			return
+		}
+	}
+	user, err := createUser(s, id)
+	if err != nil {
+		s.ChannelMessageSend(m.ChannelID, "Could not find user.")
+		return
+	}
+	displayName := user.Username + "#" + user.Discriminator
+	balance := getBalance(id)
+
+	ffWins := getStat(id, "ff_wins")
+	ffLosses := getStat(id, "ff_losses")
+	bjWins := getStat(id, "bj_wins")
+	bjLosses := getStat(id, "bj_losses")
+
+	s.ChannelMessageSendEmbed(m.ChannelID, &discordgo.MessageEmbed{
+		Author: &discordgo.MessageEmbedAuthor{},
+		Color:  0x00ff00,
+		Fields: []*discordgo.MessageEmbedField{
+			{
+				Name:   "User",
+				Value:  displayName,
+				Inline: true,
+			},
+			{
+				Name:   "Balance",
+				Value:  balance.String(),
+				Inline: true,
+			},
+			{
+				Name:   "50/50",
+				Value:  strconv.Itoa(ffWins+ffLosses) + " total\n" + strconv.Itoa(ffWins) + " wins, " + strconv.Itoa(ffLosses) + " losses (" + strconv.FormatFloat(float64(ffWins)/float64(ffWins+ffLosses)*100, 'f', 2, 64) + "%)",
+				Inline: false,
+			},
+			{
+				Name:   "Blackjack",
+				Value:  strconv.Itoa(bjWins+bjLosses) + " total\n" + strconv.Itoa(bjWins) + " wins, " + strconv.Itoa(bjLosses) + " losses (" + strconv.FormatFloat(float64(bjWins)/float64(bjWins+bjLosses)*100, 'f', 2, 64) + "%)",
+				Inline: false,
+			},
+		},
+	})
+}
+
+func addStat(id string, stat string, d int) {
+	stmt, err := db.Prepare("UPDATE users SET " + stat + "=? WHERE id=?")
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	_, err = stmt.Exec(d+getStat(id, stat), id)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+}
+
+func getStat(id, stat string) int {
+	stmt, err := db.Prepare("SELECT `" + stat + "` FROM users WHERE id=?")
+	if err != nil {
+		log.Println(err)
+		return 0
+	}
+	var c int
+	err = stmt.QueryRow(id).Scan(&c)
+	if err != nil {
+		log.Println(err)
+		return 0
+	}
+	return c
 }
