@@ -737,6 +737,8 @@ func blackjack(s *discordgo.Session, m *discordgo.MessageCreate, args []string) 
 		if getHandTotal(&dealerHand) >= 21 {
 			deck[dealerHand[len(dealerHand)-1]]++
 			dealerHand = remove(dealerHand, len(dealerHand)-1)
+		} else if len(dealerHand) < 2 {
+			dealerHand = append(dealerHand, getRandomCard(&deck))
 		} else {
 			break
 		}
@@ -855,7 +857,15 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	game, exists := blackjackGames[id]
 
 	if exists && i.Message.ID == game.msg.ID {
-		game.time = time.Now().Unix()
+		ng := blackjackGame{
+			deck:  game.deck,
+			hands: game.hands,
+			msg:   game.msg,
+			bet:   game.bet,
+			time:  time.Now().Unix(),
+		}
+		blackjackGames[id] = ng
+		game = ng
 		switch i.MessageComponentData().CustomID {
 
 		case "bj_hit":
@@ -975,7 +985,7 @@ func blackjackCont(s *discordgo.Session, i *discordgo.InteractionCreate) {
 								{
 									Name:   "Dealer",
 									Value:  "`" + game.hands[1][0] + "` `?`",
-									Inline: false,
+									Inline: true,
 								},
 							},
 							Timestamp: time.Now().Format(time.RFC3339),
